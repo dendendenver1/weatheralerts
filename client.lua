@@ -1,0 +1,10 @@
+RegisterNetEvent('weatheralerts:showNotification')
+AddEventHandler('weatheralerts:showNotification', function(message)
+    SetNotificationTextEntry("STRING")
+    AddTextComponentString(message)
+    DrawNotification(false, false)
+end)
+
+AddEventHandler('playerSpawned', function()
+    TriggerServerEvent('weatheralerts:playerJoined')
+end)
