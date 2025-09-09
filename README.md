@@ -130,7 +130,7 @@ Modify `Config.AlertInterval` (in milliseconds):
 
 - **FiveM Version**: Compatible with latest FiveM builds
 - **Game Version**: GTA V (all versions)
-- **Dependencies**: None (standalone resource)
+- **Dependencies**: [ox_lib](https://github.com/overextended/ox_lib)
 - **Conflicts**: No known conflicts with other weather-related scripts
 
 ## Support
