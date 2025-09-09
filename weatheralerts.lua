@@ -138,12 +138,26 @@ Config.WeatherTemperatures = {
 }
 
 local playerPreferences = {}
-local lastWeatherHash = nil
-local lastMessageIndex = {}
+local currentWeatherType = 'CLEAR' -- Default weather
+
+-- Server-side weather tracking (updated by clients)
+RegisterNetEvent('weatheralerts:weatherChanged')
+AddEventHandler('weatheralerts:weatherChanged', function(weatherString)
+    if weatherString and weatherString ~= currentWeatherType then
+        currentWeatherType = weatherString
+        SendWeatherAlert()
+    end
+end)
+
+RegisterNetEvent('weatheralerts:updateWeather')
+AddEventHandler('weatheralerts:updateWeather', function(weatherString)
+    if weatherString then
+        currentWeatherType = weatherString
+    end
+end)
 
 function GetCurrentWeatherType()
-    local weatherHash = GetPrevWeatherTypeHashName()
-    return weatherHash
+    return currentWeatherType
 end
 
 function GetTemperatureForWeather(weatherType)
@@ -160,25 +174,7 @@ function GetRandomWeatherMessage(weatherType)
         messages = Config.WeatherMessages['NEUTRAL']
     end
     
-    if not lastMessageIndex[weatherType] then
-        lastMessageIndex[weatherType] = 0
-    end
-    
-    local availableIndices = {}
-    for i = 1, #messages do
-        if i ~= lastMessageIndex[weatherType] then
-            table.insert(availableIndices, i)
-        end
-    end
-    
-    if #availableIndices == 0 then
-        availableIndices = {1, 2, 3, 4, 5}
-    end
-    
-    local randomIndex = availableIndices[math.random(#availableIndices)]
-    lastMessageIndex[weatherType] = randomIndex
-    
-    return messages[randomIndex]
+    return messages[math.random(#messages)]
 end
 
 function SendWeatherAlert()
@@ -190,8 +186,30 @@ function SendWeatherAlert()
     local players = GetPlayers()
     for _, playerId in ipairs(players) do
         local playerSource = tonumber(playerId)
-        if playerPreferences[playerSource] ~= false then
-            if Config.ShowInChat then
+        local prefs = playerPreferences[playerSource]
+        
+        -- Check if alerts are enabled for this player
+        local alertsEnabled = true
+        if prefs == false then
+            alertsEnabled = false
+        elseif type(prefs) == "table" and prefs.enabled == false then
+            alertsEnabled = false
+        end
+        
+        if alertsEnabled then
+            -- Check chat preference
+            local showInChat = Config.ShowInChat
+            if type(prefs) == "table" and prefs.showInChat ~= nil then
+                showInChat = prefs.showInChat
+            end
+            
+            -- Check screen notification preference
+            local showOnScreen = Config.ShowOnScreen
+            if type(prefs) == "table" and prefs.showOnScreen ~= nil then
+                showOnScreen = prefs.showOnScreen
+            end
+            
+            if showInChat then
                 TriggerClientEvent('chat:addMessage', playerSource, {
                     color = {255, 165, 0},
                     multiline = true,
@@ -199,38 +217,67 @@ function SendWeatherAlert()
                 })
             end
             
-            if Config.ShowOnScreen then
+            if showOnScreen then
                 TriggerClientEvent('weatheralerts:showNotification', playerSource, fullMessage)
             end
         end
     end
 end
 
-function CheckWeatherAndAlert()
-    local currentWeather = GetCurrentWeatherType()
-    if currentWeather ~= lastWeatherHash then
-        lastWeatherHash = currentWeather
-        SendWeatherAlert()
-    end
-end
 
-RegisterCommand('toggleweatheralerts', function(source, args, rawCommand)
-    if playerPreferences[source] == false then
-        playerPreferences[source] = true
-        TriggerClientEvent('chat:addMessage', source, {
-            color = {0, 255, 0},
-            multiline = true,
-            args = {"Weather Service", "Weather alerts have been enabled for you."}
-        })
-    else
-        playerPreferences[source] = false
-        TriggerClientEvent('chat:addMessage', source, {
-            color = {255, 0, 0},
-            multiline = true,
-            args = {"Weather Service", "Weather alerts have been disabled for you."}
-        })
+-- Handle menu toggle events
+RegisterNetEvent('weatheralerts:toggleAlerts')
+AddEventHandler('weatheralerts:toggleAlerts', function(enabled)
+    local source = source
+    playerPreferences[source] = enabled
+    
+    local message = enabled and "Weather alerts have been enabled." or "Weather alerts have been disabled."
+    local color = enabled and {0, 255, 0} or {255, 0, 0}
+    
+    TriggerClientEvent('chat:addMessage', source, {
+        color = color,
+        multiline = true,
+        args = {"Weather Service", message}
+    })
+end)
+
+RegisterNetEvent('weatheralerts:toggleChatAlerts')
+AddEventHandler('weatheralerts:toggleChatAlerts', function(enabled)
+    local source = source
+    if not playerPreferences[source] then
+        playerPreferences[source] = {}
     end
-end, false)
+    if type(playerPreferences[source]) == "boolean" then
+        playerPreferences[source] = {enabled = playerPreferences[source]}
+    end
+    playerPreferences[source].showInChat = enabled
+    
+    local message = enabled and "Chat alerts enabled." or "Chat alerts disabled."
+    TriggerClientEvent('chat:addMessage', source, {
+        color = {255, 165, 0},
+        multiline = true,
+        args = {"Weather Service", message}
+    })
+end)
+
+RegisterNetEvent('weatheralerts:toggleScreenAlerts')
+AddEventHandler('weatheralerts:toggleScreenAlerts', function(enabled)
+    local source = source
+    if not playerPreferences[source] then
+        playerPreferences[source] = {}
+    end
+    if type(playerPreferences[source]) == "boolean" then
+        playerPreferences[source] = {enabled = playerPreferences[source]}
+    end
+    playerPreferences[source].showOnScreen = enabled
+    
+    local message = enabled and "Screen notifications enabled." or "Screen notifications disabled."
+    TriggerClientEvent('chat:addMessage', source, {
+        color = {255, 165, 0},
+        multiline = true,
+        args = {"Weather Service", message}
+    })
+end)
 
 RegisterNetEvent('weatheralerts:playerJoined')
 AddEventHandler('weatheralerts:playerJoined', function()
@@ -238,6 +285,8 @@ AddEventHandler('weatheralerts:playerJoined', function()
     if playerPreferences[source] == nil then
         playerPreferences[source] = true
     end
+    -- Request current weather from the client to sync server state
+    TriggerClientEvent('weatheralerts:requestWeatherUpdate', source)
 end)
 
 AddEventHandler('playerDropped', function(reason)
@@ -252,9 +301,3 @@ Citizen.CreateThread(function()
     end
 end)
 
-Citizen.CreateThread(function()
-    while true do
-        Citizen.Wait(30000)
-        CheckWeatherAndAlert()
-    end
-end)
